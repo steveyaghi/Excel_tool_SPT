@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SPT Form Assistant</title>
+    <title>SPT Form Assistant v1.2</title>
     <style>
         * {
             margin: 0;
@@ -218,7 +218,17 @@
 
         .status-incomplete {
             background: #ffeaa7;
-            color: #fdcb6e;
+            color: #f39c12;
+        }
+
+        .status-processing {
+            background: #dbeafe;
+            color: #3b82f6;
+        }
+
+        .status-error {
+            background: #fee2e2;
+            color: #dc2626;
         }
 
         @media (max-width: 1024px) {
@@ -237,7 +247,7 @@
     <div class="container">
         <!-- Excel Form Panel -->
         <div class="form-panel">
-            <h1>SPT Form Assistant</h1>
+            <h1>SPT Form Assistant v1.2</h1>
             
             <div class="form-section">
                 <h2>📋 Setup Sheet</h2>
@@ -424,12 +434,13 @@
             
             // Show loading
             showLoading(true);
+            updateStatus('processing', 'AI is thinking...');
             
             try {
                 // Get current form data as context
                 const currentData = getCurrentFormData();
                 
-                // Send to webhook
+                // Send to webhook - Updated for AI Agent workflow
                 const response = await fetch(WEBHOOK_URL, {
                     method: 'POST',
                     headers: {
@@ -438,7 +449,8 @@
                     body: JSON.stringify({
                         message: message,
                         current_data: currentData,
-                        timestamp: new Date().toISOString()
+                        timestamp: new Date().toISOString(),
+                        version: '1.2'
                     })
                 });
 
@@ -448,12 +460,24 @@
 
                 const result = await response.json();
                 
-                // Process AI response
+                // Process AI Agent response
                 handleAIResponse(result);
                 
             } catch (error) {
                 console.error('Error:', error);
-                addMessage('❌ Sorry, I had trouble processing that. Please try again or check the connection.', 'ai');
+                let errorMessage = '❌ Sorry, I had trouble processing that. ';
+                
+                if (error.message.includes('Failed to fetch')) {
+                    errorMessage += 'Please check your internet connection and webhook URL.';
+                } else if (error.message.includes('404')) {
+                    errorMessage += 'Webhook endpoint not found. Please check the n8n workflow is active.';
+                } else if (error.message.includes('500')) {
+                    errorMessage += 'Server error. Please check the n8n workflow configuration.';
+                } else {
+                    errorMessage += 'Please try again or contact support.';
+                }
+                
+                addMessage(errorMessage, 'ai');
                 updateStatus('error', 'Connection error');
             } finally {
                 showLoading(false);
@@ -462,17 +486,31 @@
 
         function handleAIResponse(result) {
             // Add AI message to chat
-            const message = result.message || result.response || 'I updated the form based on your request.';
+            const message = result.message || result.response || 'I processed your request.';
             addMessage(message, 'ai');
             
             // Update form fields if data provided
-            if (result.extracted_data) {
+            if (result.extracted_data && Object.keys(result.extracted_data).length > 0) {
                 updateFormFields(result.extracted_data);
                 updateStatus('success', 'Form updated!');
+                
+                // Show what was updated
+                const updatedFields = Object.keys(result.extracted_data);
+                console.log('Updated fields:', updatedFields);
+                
             } else if (result.status === 'incomplete') {
                 updateStatus('incomplete', 'Need more info');
             } else if (result.status === 'complete') {
                 updateStatus('success', 'Ready to export!');
+            } else if (result.status === 'error') {
+                updateStatus('error', 'Processing error');
+            } else {
+                updateStatus('ready', 'Ready for input');
+            }
+            
+            // Handle validation errors
+            if (result.validation_errors && result.validation_errors.length > 0) {
+                console.warn('Validation errors:', result.validation_errors);
             }
         }
 
